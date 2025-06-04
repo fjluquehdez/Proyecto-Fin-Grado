@@ -1,0 +1,497 @@
+/**
+ * @file schwefel.cpp
+ * @brief GA real-codificado con SBX + mutación polinómica sobre Schwefel (Paradiseo)
+ * compilar: c++ schwefel.cpp -I../eo/src -std=c++17 -L./lib/ -leo -leoutils -o schwefel
+ * ejecutar: ./schwefel -p <poblacion> -c <cruce> -m <mutacion> -i <id>
+ */
+
+#include <eo>
+#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <chrono>
+#include <unistd.h>
+#include <fstream>
+#include <cstring>
+#include <cstdlib>
+#include <string>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+#include <cfloat>
+#include <cmath>
+
+// ----------------------------------------------------
+// Configuración del problema
+// ----------------------------------------------------
+static constexpr double LOWER_BOUND = -500.0;
+static constexpr double UPPER_BOUND = 500.0;
+static constexpr size_t INDIVIDUAL_SIZE = 1024;
+static constexpr double WORST_CASE_VALUE = 1e10;
+static constexpr int MAX_TIME_SECONDS = 120;
+static constexpr int MAX_GENERATIONS = 1000000;
+// El óptimo global de Schwefel está en x_i = 420.9687 para todas las dimensiones
+static constexpr double SCHWEFEL_GLOBAL_OPTIMUM = 420.9687;
+static constexpr double F_MAX = INDIVIDUAL_SIZE * 1000.0; 
+
+// ----------------------------------------------------
+// Individuo: vector de reales con fitness a maximizar
+struct Schwefel : public EO<eoMaximizingFitness>
+{
+    std::vector<double> x;
+    
+    double raw_value;
+    
+    Schwefel() : raw_value(DBL_MAX) {}
+    
+    Schwefel(size_t n) : x(n, 0.0), raw_value(DBL_MAX) {}
+    
+    void printOn(std::ostream &os) const override
+    {
+        for (double v : x)
+            os << v << " ";
+        os << " raw=" << raw_value;
+    }
+    
+    void readFrom(std::istream &is) override
+    {
+        for (auto &v : x)
+            is >> v;
+    }
+};
+
+// ----------------------------------------------------
+// Variables globales para estadísticas
+// ----------------------------------------------------
+struct GlobalStats {
+    double initial_fitness = 0.0;
+    double best_fitness = 0.0;
+    size_t gen_best_fitness = 0;
+    double best_raw_value = DBL_MAX;
+    double worst_raw_value = 0.0;
+    std::string termination_cause = "timeout";
+} stats;
+
+// ----------------------------------------------------
+// Evaluador de Schwefel: normalizado entre 0 y 1 (para maximización)
+struct SchwefelFunction : public eoEvalFunc<Schwefel>
+{
+    void operator()(Schwefel &ind) override
+    {
+        // Calcular el valor real de Schwefel (a minimizar)
+        double raw = 0.0;
+        double dimension = static_cast<double>(ind.x.size());
+        
+        // Fórmula original de Schwefel: 418.9829*d - sum(x_i * sin(sqrt(|x_i|)))
+        // donde d es la dimensión
+        raw = 418.9829 * dimension;
+        
+        for (size_t i = 0; i < ind.x.size(); ++i) {
+            if (std::abs(ind.x[i]) < 1e-10) {
+                // Evitar problemas con raíz cuadrada de cero
+                raw -= 0.0;
+            } else {
+                raw -= ind.x[i] * std::sin(std::sqrt(std::abs(ind.x[i])));
+            }
+        }
+        
+        // Limitar valores extremos para evitar problemas numéricos
+        if (raw > WORST_CASE_VALUE) {
+            raw = WORST_CASE_VALUE;
+        }
+        
+        // Guardar el valor bruto para referencia
+        ind.raw_value = raw;
+        
+        // Actualizar el peor valor visto (para normalización dinámica)
+        if (raw > stats.worst_raw_value) {
+            stats.worst_raw_value = raw;
+        }
+        
+        // Actualizar mejor valor bruto si corresponde
+        if (raw < stats.best_raw_value) {
+            stats.best_raw_value = raw;
+        }
+        
+        // Estimación del valor máximo posible (peor caso):
+        // Para Schwefel, el peor caso teórico es cuando todos los x_i están
+        // en los puntos donde la función seno es mínima
+        double theoretical_worst = 418.9829 * dimension + dimension * UPPER_BOUND;
+        
+        // Usar el peor valor visto hasta ahora o el teórico, el que sea mayor
+        double normalization_factor = std::max(stats.worst_raw_value, theoretical_worst);
+        
+        // Normalización invertida: 0 = peor, 1 = mejor
+        double normalized_fitness = (1.0 - (raw / F_MAX));
+        
+        // Asegurar que el fitness esté en el rango [0,1]
+        normalized_fitness = std::max(0.0, std::min(1.0, normalized_fitness));
+        
+        ind.fitness(normalized_fitness);
+    }
+};
+
+// ----------------------------------------------------
+// Inicializador: vectores aleatorios para Schwefel
+struct SchwefelInit : public eoInit<Schwefel>
+{
+    void operator()(Schwefel &ind) override
+    {
+        ind.x.resize(INDIVIDUAL_SIZE);
+        
+        // Distribución uniforme en todo el rango
+	for (double &v : ind.x) {
+		v = rng.uniform(LOWER_BOUND, UPPER_BOUND);
+	}
+    }
+};
+
+// ----------------------------------------------------
+// SBX Crossover 
+struct SafeSBXCrossover : public eoQuadOp<Schwefel>
+{
+    double eta;
+    SafeSBXCrossover(double _eta) : eta(_eta) {}
+    
+    bool operator()(Schwefel &a, Schwefel &b) override
+    {
+        const size_t n = a.x.size();
+        for (size_t i = 0; i < n; ++i)
+        {
+            try {
+                // Evitar realizar cálculos que puedan causar desbordamiento
+                if (std::abs(a.x[i] - b.x[i]) < 1e-10) {
+                    continue;  // No cambiar genes casi idénticos
+                }
+                
+                double y1, y2;
+                if (a.x[i] < b.x[i]) {
+                    y1 = a.x[i];
+                    y2 = b.x[i];
+                } else {
+                    y1 = b.x[i];
+                    y2 = a.x[i];
+                }
+                
+                // Cálculos SBX con protección contra desbordamiento
+                double beta = 1.0 + (2.0 * (y1 - LOWER_BOUND) / (y2 - y1));
+                beta = std::min(beta, 100.0);  // Limitar beta para evitar problemas
+                
+                double alpha = 2.0 - std::min(100.0, std::pow(beta, eta + 1.0));
+                
+                double u = rng.uniform();
+                double beta_q;
+                
+                if (u <= 1.0 / alpha) {
+                    beta_q = std::pow(u * alpha, 1.0 / (eta + 1.0));
+                } else {
+                    beta_q = std::pow(1.0 / (2.0 - u * alpha), 1.0 / (eta + 1.0));
+                }
+                
+                double c1 = 0.5 * ((y1 + y2) - beta_q * (y2 - y1));
+                double c2 = 0.5 * ((y1 + y2) + beta_q * (y2 - y1));
+                
+                // Mantener dentro de límites
+                c1 = std::max(LOWER_BOUND, std::min(UPPER_BOUND, c1));
+                c2 = std::max(LOWER_BOUND, std::min(UPPER_BOUND, c2));
+                
+                // Asignar valores, respetando el orden original
+                if (a.x[i] > b.x[i]) {
+                    a.x[i] = c2;
+                    b.x[i] = c1;
+                } else {
+                    a.x[i] = c1;
+                    b.x[i] = c2;
+                }
+            } 
+            catch (...) {
+                // En caso de error, aplicar cruce aritmético simple
+                double blend = rng.uniform();
+                double tmp_a = a.x[i];
+                double tmp_b = b.x[i];
+                a.x[i] = blend * tmp_a + (1.0 - blend) * tmp_b;
+                b.x[i] = (1.0 - blend) * tmp_a + blend * tmp_b;
+                
+                // Asegurar que estén dentro de límites
+                a.x[i] = std::max(LOWER_BOUND, std::min(UPPER_BOUND, a.x[i]));
+                b.x[i] = std::max(LOWER_BOUND, std::min(UPPER_BOUND, b.x[i]));
+            }
+        }
+        return true;
+    }
+};
+
+// ----------------------------------------------------
+struct RealMutation : public eoMonOp<Schwefel>
+{
+    double p_ind, p_bit, sigma;
+    
+    RealMutation(double _p_ind, double _p_bit) 
+        : p_ind(_p_ind), p_bit(_p_bit) 
+    {
+        // Factor de escala para la mutación gaussiana
+        sigma = (UPPER_BOUND - LOWER_BOUND) * 0.1;
+    }
+    
+    bool operator()(Schwefel &ind) override
+    {
+        bool mutated = false;
+        
+        // Paso 1: ¿se muta el individuo?
+        if (rng.uniform() < p_ind)
+        {
+            // Paso 2: para cada gen, decide si mutar
+            for (size_t i = 0; i < ind.x.size(); ++i)
+            {
+                if (rng.uniform() < p_bit)
+                {
+                    // Mutación gaussiana
+                    double delta = rng.normal() * sigma;
+                    ind.x[i] += delta;
+                    
+                    // Asegurar que se mantiene dentro de límites
+                    ind.x[i] = std::max(LOWER_BOUND, std::min(UPPER_BOUND, ind.x[i]));
+                    mutated = true;
+                }
+            }
+        }
+        return mutated;
+    }
+};
+
+// ----------------------------------------------------
+// Obtener fecha y hora actual formateada
+std::string getCurrentDateTime()
+{
+    auto now = std::chrono::system_clock::now();
+    auto nowTime = std::chrono::system_clock::to_time_t(now);
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&nowTime), "%Y-%m-%d_%H-%M-%S");
+    return ss.str();
+}
+
+// ----------------------------------------------------
+// Función para obtener el nombre del host
+std::string getHostName()
+{
+    char host[256];
+    gethostname(host, sizeof(host));
+    return std::string(host);
+}
+
+// ----------------------------------------------------
+int main(int argc, char **argv)
+{
+    // Parámetros por defecto
+    size_t popSize = 1024;
+    double crossover_rate = 0.8;
+    double mutation_ind_rate = 0.1;
+    double mutation_bit_rate = 0.1;
+    int run_id = 1;
+    
+    for (int i = 1; i < argc; ++i)
+    {
+        if (strcmp(argv[i], "-p") == 0 && i + 1 < argc)
+            popSize = std::stoul(argv[++i]);
+        else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc)
+            crossover_rate = std::stod(argv[++i]);
+        else if (strcmp(argv[i], "-m") == 0 && i + 1 < argc)
+            mutation_ind_rate = std::stod(argv[++i]);
+        else if (strcmp(argv[i], "-mb") == 0 && i + 1 < argc)
+            mutation_bit_rate = std::stod(argv[++i]);
+        else if (strcmp(argv[i], "-i") == 0 && i + 1 < argc)
+            run_id = std::atoi(argv[++i]);
+    }
+    
+    // Inicialización de componentes
+    SchwefelInit init;
+    SchwefelFunction eval;
+    SafeSBXCrossover xover(2.0);  
+    RealMutation mutate(mutation_ind_rate, mutation_bit_rate);
+    eoDetTournamentSelect<Schwefel> select(2);
+    
+    // Inicializar estadísticas
+    stats = GlobalStats();
+    
+    // Nombre del archivo de resultados basado en el host
+    std::string resultsFile = "resultados_schwefel_paradiseo_" + getHostName() + ".csv";
+    
+    // Verificar si el archivo existe para escribir la cabecera
+    bool fileExists = std::ifstream(resultsFile).good();
+    
+    // Abrir archivo CSV para resultados
+    std::ofstream csv(resultsFile, std::ios::app);
+    if (!fileExists) {
+        csv << "population_size,crossover_rate,mutation_individual_rate,"
+            << "mutation_bit_rate,run,generations,initial_fitness,"
+            << "best_fitness,fitness_variation,time,energy_consumed,"
+            << "schwefel_value,worst_schwefel_seen,hostname\n";
+    }
+    
+    // Población inicial
+    eoPop<Schwefel> pop;
+    pop.reserve(popSize);
+    for (size_t i = 0; i < popSize; ++i)
+    {
+        Schwefel ind(INDIVIDUAL_SIZE);
+        init(ind);
+        eval(ind);
+        pop.push_back(ind);
+    }
+    
+    // Fitness inicial máximo
+    double initMax = double(pop[0].fitness());
+    for (auto &ind : pop)
+        initMax = std::max(initMax, double(ind.fitness()));
+    
+    // Actualizar estadísticas iniciales
+    stats.initial_fitness = initMax;
+    stats.best_fitness = initMax;
+    
+    // Fecha y hora actual para el registro
+    std::string dateTime = getCurrentDateTime();
+    
+    auto t0 = std::chrono::steady_clock::now();
+    std::string stop = "timeout";
+    size_t gen = 0;
+    
+    // Parámetro de elitismo: número de mejores individuos a preservar
+    const size_t elitismCount = std::max(size_t(1), size_t(popSize * 0.05)); // 5% de elitismo
+    
+    while (true)
+    {
+        auto dt = std::chrono::duration_cast<std::chrono::seconds>(
+                      std::chrono::steady_clock::now() - t0)
+                      .count();
+        
+        // Comprobar condiciones de finalización
+        if (dt >= MAX_TIME_SECONDS)
+        {
+            stats.termination_cause = "timeout";
+            break;
+        }
+        if (gen >= MAX_GENERATIONS)
+        {
+            stats.termination_cause = "max_generations";
+            break;
+        }
+        
+        // Actualizar contador de generaciones
+        ++gen;
+        
+        // Para primeras generaciones o cada 50, mostrar información
+        if (gen < 3 || gen % 50 == 0) {
+            std::cout << "  Gen " << gen << ": fitness=" << stats.best_fitness
+                      << ", raw=" << stats.best_raw_value 
+                      << ", worst_seen=" << stats.worst_raw_value << std::endl;
+        }
+        
+        // Guardar los mejores individuos para elitismo
+        std::vector<Schwefel> elites;
+        elites.reserve(elitismCount);
+        
+        // Ordenar población por fitness (de mayor a menor)
+        std::sort(pop.begin(), pop.end(), [](const Schwefel& a, const Schwefel& b) {
+            return a.fitness() > b.fitness();
+        });
+        
+        // Guardar los mejores individuos
+        for (size_t i = 0; i < elitismCount && i < pop.size(); ++i) {
+            elites.push_back(pop[i]);
+        }
+        
+        // Crear nueva generación
+        eoPop<Schwefel> offspring;
+        offspring.reserve(popSize);
+        
+        // Añadir los elites primero
+        for (const auto& elite : elites) {
+            offspring.push_back(elite);
+        }
+        
+        // Generar el resto de la descendencia hasta completar la población
+        while (offspring.size() < popSize)
+        {
+            Schwefel p1 = select(pop);
+            Schwefel p2 = select(pop);
+            
+            if (rng.uniform() < crossover_rate)
+                xover(p1, p2);
+                
+            mutate(p1);
+            mutate(p2);
+            
+            eval(p1);
+            eval(p2);
+            
+            offspring.push_back(p1);
+            if (offspring.size() < popSize)
+                offspring.push_back(p2);
+        }
+        
+        // Si generamos más individuos de los necesarios, recortar
+        if (offspring.size() > popSize) {
+            offspring.resize(popSize);
+        }
+        
+        pop = offspring;
+        
+        // Actualizar estadísticas
+        for (auto &ind : pop)
+        {
+            double f = double(ind.fitness());
+            if (f > stats.best_fitness)
+            {
+                stats.best_fitness = f;
+                stats.gen_best_fitness = gen;
+                
+                // Si llegamos a convergencia perfecta (muy improbable en Schwefel)
+                if (stats.best_raw_value < 1e-10)
+                {
+                    stats.termination_cause = "convergence";
+                    break;
+                }
+            }
+        }
+
+        if (stats.termination_cause == "convergence")
+            break;
+    }
+    
+    auto t1 = std::chrono::steady_clock::now();
+    double timeSec = std::chrono::duration_cast<std::chrono::seconds>(t1 - t0).count();
+    
+    double fitness_variation = stats.best_fitness - stats.initial_fitness;
+    
+    double emissions = 0.0;
+    
+    // Mostrar resultados finales
+    std::cout << "  • Generaciones: " << gen + 1 << " | "
+              << "Aptitud inicial=" << stats.initial_fitness << " → "
+              << "mejor=" << stats.best_fitness << " | "
+              << "Δ=" << fitness_variation << std::endl;
+    std::cout << "  • Valor Schwefel: mejor=" << stats.best_raw_value << ", "
+              << "peor visto=" << stats.worst_raw_value << std::endl;
+    std::cout << "    Tiempo: " << timeSec << "s | "
+              << "Parada: " << stats.termination_cause << std::endl;
+    
+    // Escribir resultados en CSV
+    csv << popSize << ","                  // population_size
+        << crossover_rate << ","           // crossover_rate
+        << mutation_ind_rate << ","        // mutation_individual_rate
+        << mutation_bit_rate << ","        // mutation_bit_rate
+        << run_id << ","                   // run
+        << gen + 1 << ","                  // generations
+        << stats.initial_fitness/100 << ","    // initial_fitness
+        << stats.best_fitness/100 << ","       // best_fitness
+        << fitness_variation/100 << ","        // fitness_variation
+        << timeSec << ","                  // time
+        << emissions << ","                // energy_consumed (no disponible)
+        << stats.best_raw_value << ","     // Schwefel_value
+        << stats.worst_raw_value << ","    // worst_Schwefel_seen
+        << getHostName() << "\n";          // hostname
+        
+    csv.close();
+    
+    return 0;
+}
