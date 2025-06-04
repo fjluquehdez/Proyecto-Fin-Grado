@@ -1,0 +1,82 @@
+# Nombre de la clase de problema
+eval.problem    = SphereProblem
+
+# Definición del estado de evolución
+state           = ec.simple.SimpleEvolutionState
+
+# Inicialización
+init = ec.simple.SimpleInitializer
+
+# Número de generaciones
+generations     = 1000000
+
+# Configuración de la población
+pop                 = ec.Population
+pop.subpops         = 1
+pop.subpop.0        = ec.Subpopulation
+
+# Tamaño de la población
+pop.subpop.0.size = 16384
+pop.subpop.0.duplicate-retries      = 0
+
+# Especie y tipo de individuos
+pop.subpop.0.species                = ec.vector.FloatVectorSpecies
+    
+# Tamaño del genoma (cadena binaria)
+pop.subpop.0.species.genome-size    = 1024
+pop.subpop.0.species.min-gene = -5.12
+pop.subpop.0.species.max-gene = 5.12  
+
+# Especifica que la especie use mutación polinómica
+pop.subpop.0.species.mutation-type = polynomial
+# Fija el índice de distribución ηₘ para la mutación polinómica (>=0)
+pop.subpop.0.species.mutation-distribution-index = 1
+# Define si la mutación debe ser acotada a los límites (corrige warning)
+pop.subpop.0.species.mutation-bounded = true
+# Define la versión alternativa de mutación polinómica (corrige warning)
+pop.subpop.0.species.alternative-polynomial-version = true
+
+# Operadores evolutivos
+pop.subpop.0.species.pipe           = ec.breed.MultiBreedingPipeline
+pop.subpop.0.species.pipe.num-sources = 1
+pop.subpop.0.species.pipe.source.0  = ec.vector.breed.VectorCrossoverPipeline
+
+# Probabilidad de cruce
+pop.subpop.0.species.pipe.source.0.prob = 0.8
+# Probabilidad de mutación
+pop.subpop.0.species.mutation-prob      = 0.1  
+
+pop.subpop.0.species.crossover-type             = sbx
+# Fija el índice de distribución ηc para el cruce SBX (>=0)
+pop.subpop.0.species.crossover-distribution-index = 1
+pop.subpop.0.species.fitness                    = ec.simple.SimpleFitness
+pop.subpop.0.species.ind                        = ec.vector.DoubleVectorIndividual
+pop.subpop.0.species.pipe.source.0.source.0	= ec.select.TournamentSelection
+pop.subpop.0.species.pipe.source.0.source.1	= ec.select.TournamentSelection
+
+# Selección
+select                  = ec.select.TournamentSelection
+select.tournament.size  = 3
+
+# Estadísticas
+#stat        = ec.simple.SimpleStatistics
+stat        = SphereStatistics
+stat.file   = $out.stat
+exch        = ec.simple.SimpleExchanger
+
+# Finalización
+finish = ec.simple.SimpleFinisher
+
+# Configuración adicional    
+# Algoritmo de evolución
+breed                   = ec.simple.SimpleBreeder
+breed.elite.0           = 1
+# eval                    = ec.simple.SimpleEvaluator
+eval                    = TimeConstrainedEvaluator
+breedthreads            = 1
+evalthreads             = 1
+seed.0                  = time
+checkpoint		= false
+checkpoint-prefix	= ec
+checkpoint-modulo	= 1
+quit-on-run-complete    = true
