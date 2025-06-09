@@ -20,19 +20,21 @@
 #include <cstdlib>
 #include <fstream> // Para guardar el CSV
 
+using namespace std;
+
 //-----------------------------------------------------
 // Definición del individuo para OneMax (cadena binaria)
 // Hereda de EO con fitness de maximización.
 class OneMax : public EO<eoMaximizingFitness>
 {
 public:
-    std::vector<bool> bits{0};
+    vector<bool> bits{0};
 
     OneMax() {}
     OneMax(size_t n) : bits(n, false) {}
 
-    // Imprime la cadena (sin espacios)
-    void printOn(std::ostream &os) const override
+    // Imprime la cadena
+    void printOn(ostream &os) const override
     {
         for (bool b : bits)
         {
@@ -41,7 +43,7 @@ public:
     }
 
     // Lectura del individuo (usando índices para vector<bool>)
-    void readFrom(std::istream &is) override
+    void readFrom(istream &is) override
     {
         for (size_t i = 0; i < bits.size(); ++i)
         {
@@ -105,7 +107,7 @@ public:
         size_t point = eo::rng.random(n);
         for (size_t i = point; i < n; ++i)
         {
-            std::swap(parent1.bits[i], parent2.bits[i]);
+            swap(parent1.bits[i], parent2.bits[i]);
         }
         return true;
     }
@@ -146,18 +148,18 @@ void parseArgs(int argc, char **argv, size_t &popSize, double &pc, int &id)
     id = 1;
     for (int i = 1; i < argc; i++)
     {
-        std::string arg = argv[i];
+        string arg = argv[i];
         if (arg == "-p" && i + 1 < argc)
         {
-            popSize = std::stoul(argv[++i]);
+            popSize = stoul(argv[++i]);
         }
         else if (arg == "-c" && i + 1 < argc)
         {
-            pc = std::stod(argv[++i]);
+            pc = stod(argv[++i]);
         }
         else if (arg == "-i" && i + 1 < argc)
         {
-            id = std::stod(argv[++i]);
+            id = stod(argv[++i]);
         }
     }
 }
@@ -172,14 +174,14 @@ int main(int argc, char **argv)
     parseArgs(argc, argv, popSize, pc, id);
 
     const size_t nbits = 1024;             // Longitud de la cadena binaria (fitness máximo = nbits)
-    const double pm = 0.01;                // Probabilidad de mutación (fija)
+    const double pm = 0.1;                 // Probabilidad de mutación (fija)
     const size_t nGenerationsMax = 100000; // Límite de generaciones
 
     // Condiciones de parada: fitness == nbits (100%) o timeout de 2 minutos (120 segundos)
     const int timeout_seconds = 120;
 
     // Datos para la salida final
-    std::string stop_reason = "";
+    string stop_reason = "";
     size_t generation_stop = 0;
     int fitness_initial = 0;
     int best_fitness = 0;
@@ -189,13 +191,13 @@ int main(int argc, char **argv)
     time_t now_time = time(nullptr);
     char time_str[100];
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now_time));
-    std::string fecha_hora = time_str;
-    std::string framework = "Paradiseo";
+    string fecha_hora = time_str;
+    string framework = "Paradiseo";
 
     // Obtener el hostname (dónde se ha ejecutado)
     char hostname[1024];
     gethostname(hostname, sizeof(hostname));
-    std::string ejecutado_en = hostname;
+    string ejecutado_en = hostname;
 
     // Inicializar la semilla del generador de números aleatorios
     eo::rng.reseed(now_time);
@@ -218,14 +220,14 @@ int main(int argc, char **argv)
     }
 
     // Registrar el fitness inicial
-    auto bestIt = std::max_element(pop.begin(), pop.end(), [](const OneMax &a, const OneMax &b)
+    auto bestIt = max_element(pop.begin(), pop.end(), [](const OneMax &a, const OneMax &b)
                                    { return a.fitness() < b.fitness(); });
     fitness_initial = bestIt->fitness();
     best_fitness = fitness_initial;
     generation_max_fitness = 0;
 
     // Iniciar el cronómetro
-    auto start = std::chrono::steady_clock::now();
+    auto start = chrono::steady_clock::now();
 
     // Operadores genéticos
     OnePointCrossover crossover;
@@ -265,7 +267,7 @@ int main(int argc, char **argv)
         pop = newPop;
 
         // Evaluar el mejor fitness de la generación actual
-        bestIt = std::max_element(pop.begin(), pop.end(), [](const OneMax &a, const OneMax &b)
+        bestIt = max_element(pop.begin(), pop.end(), [](const OneMax &a, const OneMax &b)
                                   { return a.fitness() < b.fitness(); });
         int current_best = bestIt->fitness();
         if (current_best > best_fitness)
@@ -273,11 +275,12 @@ int main(int argc, char **argv)
             best_fitness = current_best;
             generation_max_fitness = gen;
         }
-
-        // Comprobar condiciones de parada
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start).count();
+        
+        auto now = chrono::steady_clock::now();
+        auto elapsed = chrono::duration_cast<chrono::seconds>(now - start).count();
         generation_stop = gen; // Se actualiza cada generación
+        
+        // Comprobar condiciones de parada
         if (current_best >= (int)nbits)
         {
             stop_reason = "Fitness alcanzado";
@@ -291,34 +294,34 @@ int main(int argc, char **argv)
     }
 
     // Calcular el tiempo total de ejecución
-    auto finish = std::chrono::steady_clock::now();
-    double tiempo_ejecucion = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start).count() / 1000.0;
+    auto finish = chrono::steady_clock::now();
+    double tiempo_ejecucion = chrono::duration_cast<chrono::milliseconds>(finish - start).count() / 1000.0;
 
-    // Calcular la variación de fitness (fitness_final - fitness_inicial)
+    // Calcular la variación de fitness (fitness_maximo - fitness_inicial)
     int variacion_fitness = best_fitness - fitness_initial;
 
     // Imprimir la información final
     /*
-    std::cout << "================ Resumen de la ejecución ================\n";
-    std::cout << "ID: " << id << "\n";
-    std::cout << "Fecha y hora: " << fecha_hora << "\n";
-    std::cout << "Framework: " << framework << "\n";
-    std::cout << "Tamaño de la población: " << popSize << "\n";
-    std::cout << "Probabilidad de cruce: " << pc << "\n";
-    std::cout << "Probabilidad de mutación: " << pm << "\n";
-    std::cout << "Generación alcanzada: " << generation_stop << "\n";
-    std::cout << "Fitness inicial: " << fitness_initial << "\n";
-    std::cout << "Variación de fitness: " << variacion_fitness << "\n";
-    std::cout << "Fitness final: " << best_fitness << "\n";
-    std::cout << "Tiempo de ejecución (s): " << tiempo_ejecucion << "\n";
-    std::cout << "Generación donde se alcanzó el fitness máximo: " << generation_max_fitness << "\n";
-    std::cout << "Fitness máximo alcanzado: " << best_fitness << "\n";
-    std::cout << "Motivo de parada: " << (stop_reason.empty() ? "Fin de generaciones" : stop_reason) << "\n";
-    std::cout << "Dónde se ha ejecutado: " << ejecutado_en << "\n";
-    std::cout << "==========================================================\n";
+    cout << "================ Resumen de la ejecución ================\n";
+    cout << "ID: " << id << "\n";
+    cout << "Fecha y hora: " << fecha_hora << "\n";
+    cout << "Framework: " << framework << "\n";
+    cout << "Tamaño de la población: " << popSize << "\n";
+    cout << "Probabilidad de cruce: " << pc << "\n";
+    cout << "Probabilidad de mutación: " << pm << "\n";
+    cout << "Generación alcanzada: " << generation_stop << "\n";
+    cout << "Fitness inicial: " << fitness_initial << "\n";
+    cout << "Variación de fitness: " << variacion_fitness << "\n";
+    cout << "Fitness final: " << best_fitness << "\n";
+    cout << "Tiempo de ejecución (s): " << tiempo_ejecucion << "\n";
+    cout << "Generación donde se alcanzó el fitness máximo: " << generation_max_fitness << "\n";
+    cout << "Fitness máximo alcanzado: " << best_fitness << "\n";
+    cout << "Motivo de parada: " << (stop_reason.empty() ? "Fin de generaciones" : stop_reason) << "\n";
+    cout << "Dónde se ha ejecutado: " << ejecutado_en << "\n";
+    cout << "==========================================================\n";
     */
     // Guardar los resultados en CSV
-    std::ofstream csv("onemax_resultados.csv", std::ios::app);
+    ofstream csv("onemax_resultados.csv", ios::app);
     // Si el archivo está vacío, escribir la cabecera
     if (csv.tellp() == 0)
     {
