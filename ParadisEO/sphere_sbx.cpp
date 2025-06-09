@@ -1,6 +1,5 @@
 /**
  * @file sphere_sbx.cpp
- * @brief GA real-codificado con SBX + mutación polinómica sobre Sphere
  * compilar: c++ sphere_sbx.cpp -I../eo/src -std=c++17 -L./lib/ -leo -leoutils -o sphere_sbx
  * ejecutar: ./sphere_sbx -p <poblacion> -c <cruce> -m <mutacion> -i <id>
  */
@@ -19,19 +18,21 @@
 #include <iomanip>
 #include <sstream>
 
+using namespace std;
+
 // ----------------------------------------------------
 // Individuo: vector de reales con fitness a maximizar
 struct Sphere : public EO<eoMaximizingFitness>
 {
-    std::vector<double> x;
+    vector<double> x;
     Sphere() {}
     Sphere(size_t n) : x(n, 0.0) {}
-    void printOn(std::ostream &os) const override
+    void printOn(ostream &os) const override
     {
         for (double v : x)
             os << v << " ";
     }
-    void readFrom(std::istream &is) override
+    void readFrom(istream &is) override
     {
         for (auto &v : x)
             is >> v;
@@ -87,8 +88,8 @@ struct SBXCrossover : public eoQuadOp<Sphere>
                               : pow(1.0 / (2.0 * (1.0 - u)), 1.0 / (eta + 1.0));
             double c1 = 0.5 * ((1 + beta) * a.x[i] + (1 - beta) * b.x[i]);
             double c2 = 0.5 * ((1 - beta) * a.x[i] + (1 + beta) * b.x[i]);
-            a.x[i] = std::min(std::max(c1, SphereFunction::LOW), SphereFunction::UP);
-            b.x[i] = std::min(std::max(c2, SphereFunction::LOW), SphereFunction::UP);
+            a.x[i] = min(max(c1, SphereFunction::LOW), SphereFunction::UP);
+            b.x[i] = min(max(c2, SphereFunction::LOW), SphereFunction::UP);
         }
         return true;
     }
@@ -113,7 +114,7 @@ struct PolyMutation : public eoMonOp<Sphere>
                                    ? pow(2.0 * u, 1.0 / (eta + 1.0)) - 1.0
                                    : 1.0 - pow(2.0 * (1.0 - u), 1.0 / (eta + 1.0));
                 double v = ind.x[i] + delta * (SphereFunction::UP - SphereFunction::LOW);
-                ind.x[i] = std::min(std::max(v, SphereFunction::LOW), SphereFunction::UP);
+                ind.x[i] = min(max(v, SphereFunction::LOW), SphereFunction::UP);
                 mutated = true;
             }
         }
@@ -123,12 +124,12 @@ struct PolyMutation : public eoMonOp<Sphere>
 
 // ----------------------------------------------------
 // Obtener fecha y hora actual formateada
-std::string getCurrentDateTime()
+string getCurrentDateTime()
 {
-    auto now = std::chrono::system_clock::now();
-    auto nowTime = std::chrono::system_clock::to_time_t(now);
-    std::stringstream ss;
-    ss << std::put_time(std::localtime(&nowTime), "%Y-%m-%d_%H-%M-%S");
+    auto now = chrono::system_clock::now();
+    auto nowTime = chrono::system_clock::to_time_t(now);
+    stringstream ss;
+    ss << put_time(localtime(&nowTime), "%Y-%m-%d_%H-%M-%S");
     return ss.str();
 }
 
@@ -141,13 +142,13 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; ++i)
     {
         if (strcmp(argv[i], "-p") == 0 && i + 1 < argc)
-            popSize = std::stoul(argv[++i]);
+            popSize = stoul(argv[++i]);
         else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc)
-            pc = std::stod(argv[++i]);
+            pc = stod(argv[++i]);
         else if (strcmp(argv[i], "-m") == 0 && i + 1 < argc)
-            pm = std::stod(argv[++i]);
+            pm = stod(argv[++i]);
         else if (strcmp(argv[i], "-i") == 0 && i + 1 < argc)
-            id = std::atoi(argv[++i]);
+            id = atoi(argv[++i]);
     }
 
     SphereInit init;
@@ -170,27 +171,27 @@ int main(int argc, char **argv)
     // Fitness inicial máximo
     double initMax = double(pop[0].fitness());
     for (auto &ind : pop)
-        initMax = std::max(initMax, double(ind.fitness()));
+        initMax = max(initMax, double(ind.fitness()));
     double bestFit = initMax;
     size_t genBest = 0;
 
     // CSV
-    std::ofstream csv("sphere_results.csv", std::ios::app);
+    ofstream csv("sphere_results.csv", ios::app);
     if (csv.tellp() == 0)
         csv << "fecha_hora,framework,tamanio_individuo,poblacion,cruce,mutacion,generacion,fitness_inicial,variacion_fitness,fitness_maximo,generacion_mejor,tiempo_transcurrido,motivo_parada,ubicacion_ejecucion\n";
 
     // Obtener fecha y hora actual
-    std::string dateTime = getCurrentDateTime();
+    string dateTime = getCurrentDateTime();
 
     // Bucle principal
-    auto t0 = std::chrono::steady_clock::now();
+    auto t0 = chrono::steady_clock::now();
     const int maxTime = 120;
-    std::string stop = "timeout";
+    string stop = "timeout";
     size_t gen = 0;
     while (true)
     {
-        auto dt = std::chrono::duration_cast<std::chrono::seconds>(
-                      std::chrono::steady_clock::now() - t0)
+        auto dt = chrono::duration_cast<chrono::seconds>(
+                      chrono::steady_clock::now() - t0)
                       .count();
         if (dt >= maxTime)
         {
@@ -233,8 +234,8 @@ int main(int argc, char **argv)
             break;
     }
 
-    auto t1 = std::chrono::steady_clock::now();
-    double timeSec = std::chrono::duration_cast<std::chrono::seconds>(t1 - t0).count();
+    auto t1 = chrono::steady_clock::now();
+    double timeSec = chrono::duration_cast<chrono::seconds>(t1 - t0).count();
     double var = bestFit - initMax;
     char host[256];
     gethostname(host, sizeof(host));
