@@ -166,7 +166,7 @@ Cada directorio `BBDD_*` contiene:
 
 ## 📚 Publicaciones y Referencias
 
-Ver [memoria completa del PFG](MEMORIA_PFG_JAVIER_LUQUE_2025.pdf) para:
+Ver [memoria completa del PFG](MEMORIA PFG JAVIER LUQUE 2025.pdf) para:
 - **Revisión exhaustiva** del estado del arte
 - **Metodología detallada** y justificación experimental
 - **Análisis estadístico completo** de los 2.880 experimentos
